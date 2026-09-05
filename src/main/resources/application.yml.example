@@ -1,0 +1,10 @@
+server:
+  port: ${WEB_GPT_PORT:8080}
+
+webgpt:
+  auth:
+    username: ${WEB_GPT_USERNAME:admin}
+    password: ${WEB_GPT_PASSWORD:changeme}
+  settings:
+    ollama-url: ${OLLAMA_URL:http://localhost:11434}
+    default-model: ${DEFAULT_MODEL:llama3}
