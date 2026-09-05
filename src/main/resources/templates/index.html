@@ -1,0 +1,247 @@
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>WebGPT - Ollama Chat Interface</title>
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #060606;
+                color: #eee;
+                height: 100vh;
+                display: flex;
+                flex-direction: column;
+            }
+            header {
+                background: #000611;
+                padding: 1rem 2rem;
+                border-bottom: 1px solid #272727;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            header h1 { font-size: 1.5rem; color: #01BAEF; }
+            .model-info { font-size: 0.85rem; color: #aaa; }
+            #chat-container {
+                flex: 1;
+                overflow-y: auto;
+                padding: 2rem;
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+            }
+            .message {
+                max-width: 80%;
+                padding: 1rem 1.5rem;
+                border-radius: 12px;
+                line-height: 1.6;
+                animation: fadeIn 0.3s ease;
+            }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+            .message.user {
+                background: #0f3460;
+                align-self: flex-end;
+                border-bottom-right-radius: 4px;
+            }
+            .message.assistant {
+                background: #16213e;
+                align-self: flex-start;
+                border-bottom-left-radius: 4px;
+                border: 1px solid #0f3460;
+            }
+            .message.system {
+                background: #1a1a2e;
+                align-self: center;
+                font-size: 0.85rem;
+                color: #888;
+                border: 1px dashed #444;
+                max-width: 90%;
+            }
+            .message.error {
+                background: #3d1a1a;
+                border: 1px solid #e94560;
+                color: #ff6b6b;
+            }
+            #input-area {
+                padding: 1.5rem 2rem;
+                background: #000611;
+                border-top: 1px solid #272727;
+            }
+            .input-wrapper {
+                display: flex;
+                gap: 0.75rem;
+                max-width: 900px;
+                margin: 0 auto;
+            }
+            #prompt-input {
+                flex: 1;
+                padding: 0.875rem 1.25rem;
+                background: #1a1a2e;
+                border: 1px solid #0f3460;
+                border-radius: 8px;
+                color: #eee;
+                font-size: 1rem;
+                resize: none;
+                min-height: 50px;
+                max-height: 200px;
+                font-family: inherit;
+            }
+            #prompt-input:focus { outline: none; border-color: #01BAEF; }
+            #prompt-input::placeholder { color: #666; }
+            button#send-btn {
+                padding: 0 2rem;
+                background: #01BAEF;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 1rem;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background 0.2s, transform 0.1s;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            button#send-btn:hover:not(:disabled) { background: #d63a55; }
+            button#send-btn:active:not(:disabled) { transform: scale(0.98); }
+            button#send-btn:disabled { background: #444; cursor: not-allowed; }
+            .system-prompt-toggle {
+                max-width: 900px;
+                margin: 0 auto 1rem;
+                padding: 0 2rem;
+            }
+            .system-prompt-toggle summary {
+                cursor: pointer;
+                color: #888;
+                font-size: 0.85rem;
+                padding: 0.5rem 0;
+            }
+            #system-prompt {
+                width: 100%;
+                padding: 0.75rem 1rem;
+                background: #1a1a2e;
+                border: 1px solid #0f3460;
+                border-radius: 6px;
+                color: #eee;
+                font-size: 0.85rem;
+                font-family: monospace;
+                resize: vertical;
+                min-height: 60px;
+            }
+            .loading { opacity: 0.6; pointer-events: none; }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1>WebGPT</h1>
+            <div class="model-info" id="model-info" hidden="hidden">Loading...</div>
+        </header>
+        <div id="chat-container"></div>
+        <div id="input-area">
+            <div class="system-prompt-toggle">
+                <details>
+                    <summary>System Prompt (optional)</summary>
+                    <textarea id="system-prompt" placeholder="Enter system prompt..."></textarea>
+                </details>
+            </div>
+            <div class="input-wrapper">
+                <textarea id="prompt-input" placeholder="Type your message... (Shift+Enter for new line)"></textarea>
+                <button id="send-btn" aria-label="Send">Send</button>
+            </div>
+        </div>
+        <script>
+            const chatContainer = document.getElementById('chat-container');
+            const promptInput = document.getElementById('prompt-input');
+            const sendBtn = document.getElementById('send-btn');
+            const systemPromptInput = document.getElementById('system-prompt');
+            const modelInfo = document.getElementById('model-info');
+
+            let isLoading = false;
+
+            async function fetchModelInfo() {
+                try {
+                    const res = await fetch('/api/models');
+                    const data = await res.json();
+                    modelInfo.textContent = `Model: ${data.defaultModel} | Ollama: ${data.ollamaUrl}`;
+                } catch (e) {
+                    modelInfo.textContent = 'Model: unknown';
+                }
+            }
+
+            function addMessage(content, type = 'assistant') {
+                const div = document.createElement('div');
+                div.className = `message ${type}`;
+                div.textContent = content;
+                chatContainer.appendChild(div);
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+                return div;
+            }
+
+            function setLoading(loading) {
+                isLoading = loading;
+                sendBtn.disabled = loading;
+                promptInput.disabled = loading;
+                if (loading) {
+                    document.body.classList.add('loading');
+                } else {
+                    document.body.classList.remove('loading');
+                }
+            }
+
+            async function sendMessage() {
+                const prompt = promptInput.value.trim();
+                if (!prompt || isLoading) return;
+
+                const systemPrompt = systemPromptInput.value.trim();
+
+                addMessage(prompt, 'user');
+                promptInput.value = '';
+                promptInput.style.height = 'auto';
+
+                setLoading(true);
+                const loadingMsg = addMessage('Thinking...', 'assistant');
+
+                try {
+                    const res = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt, systemPrompt })
+                    });
+
+                    const data = await res.json();
+                    loadingMsg.remove();
+
+                    if (res.ok) {
+                        addMessage(data.response, 'assistant');
+                    } else {
+                        addMessage(data.response || 'Error occurred', 'error');
+                    }
+                } catch (e) {
+                    loadingMsg.remove();
+                    addMessage('Connection error. Is the server running?', 'error');
+                } finally {
+                    setLoading(false);
+                    promptInput.focus();
+                }
+            }
+
+            sendBtn.addEventListener('click', sendMessage);
+
+            promptInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            promptInput.addEventListener('input', () => {
+                promptInput.style.height = 'auto';
+                promptInput.style.height = Math.min(promptInput.scrollHeight, 200) + 'px';
+            });
+
+            fetchModelInfo();
+            promptInput.focus();
+        </script>
+    </body>
+</html>
