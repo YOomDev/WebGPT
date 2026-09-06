@@ -5,3 +5,4 @@ A mostly AI generated project, this project is mainly for having a remote entran
  - Logging Util
  - OllamaAPI.java
  - Most of the colors for the styling
+ - POM file
